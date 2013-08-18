@@ -32,6 +32,12 @@ func pageMust(page *Page, err error) *Page {
 	return page
 }
 
+func pageRecoverAndLog(t *testing.T) {
+	if err := recover(); err != nil {
+		t.Errorf("panic/recover: %s\n", err)
+	}
+}
+
 func TestDegenerateCreatePageFrom(t *testing.T) {
 	tests := []struct {
 		content string
@@ -93,11 +99,6 @@ func TestStandaloneCreatePageFrom(t *testing.T) {
 }
 
 func TestLongFormRender(t *testing.T) {
-	defer func() {
-		if err := recover(); err != nil {
-			t.Errorf("panic/recover %s\n", err)
-		}
-	}()
 
 	tests := []struct {
 		filename string
@@ -111,6 +112,7 @@ func TestLongFormRender(t *testing.T) {
 			t.Fatalf("Unable to open %s: %s", path, err)
 		}
 
+		defer pageRecoverAndLog(t)
 		p := pageMust(ReadFrom(f))
 		checkPageFrontMatterIsNil(t, p, "[long file]", false)
 	}
@@ -187,11 +189,6 @@ func TestExtractFrontMatter(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("panic/recovered: %s: %q", r, test.frontmatter)
-			}
-		}()
 		fm, err := extractFrontMatter(strings.NewReader(test.frontmatter))
 		if (err == nil) != test.errIsNil {
 			t.Logf("\n%q\n", string(test.frontmatter))
