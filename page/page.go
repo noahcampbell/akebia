@@ -121,7 +121,7 @@ func extractFrontMatter(r io.Reader) (fm FrontMatter, err error) {
 
 	// strip off front matter delim if it's present.
 	if isFrontMatterDelim(buf) {
-		buf = buf[4:]
+		buf = buf[bytes.Index(buf, []byte{'\n'})+1:]
 	}
 
 	for i, c := range buf {

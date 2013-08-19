@@ -168,7 +168,6 @@ func TestPageHasFrontMatter(t *testing.T) {
 		{[]byte{'a'}, false},
 	}
 	for _, test := range tests {
-
 		for _, ending := range lineEndings {
 			test.content = bytes.Replace(test.content, []byte("\n"), []byte(ending), -1)
 			if isFrontMatterDelim := isFrontMatterDelim(test.content); isFrontMatterDelim != test.expected {
@@ -200,14 +199,18 @@ func TestExtractFrontMatter(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		fm, err := extractFrontMatter(strings.NewReader(test.frontmatter))
-		if (err == nil) != test.errIsNil {
-			t.Logf("\n%q\n", string(test.frontmatter))
-			t.Errorf("Expected err == nil => %t, got: %t. err: %s", test.errIsNil, err == nil, err)
-			continue
-		}
-		if !bytes.Equal(fm, test.extracted) {
-			t.Errorf("Expected Front Matter %q. got %q", string(test.extracted), fm)
+		for _, ending := range lineEndings {
+			test.frontmatter = strings.Replace(test.frontmatter, "\n", ending, -1)
+			fm, err := extractFrontMatter(strings.NewReader(test.frontmatter))
+			if (err == nil) != test.errIsNil {
+				t.Logf("\n%q\n", string(test.frontmatter))
+				t.Errorf("Expected err == nil => %t, got: %t. err: %s", test.errIsNil, err == nil, err)
+				continue
+			}
+			if !bytes.Equal(fm, test.extracted) {
+				t.Logf("\n%q\n", string(test.frontmatter))
+				t.Errorf("Expected front matter %q. got %q", string(test.extracted), fm)
+			}
 		}
 	}
 }
