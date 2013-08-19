@@ -14,7 +14,7 @@ var (
 	CONTENT_WITH_FRONTMATTER        = "---\ntitle: front matter\n---\nContent with front matter"
 	CONTENT_HTML_NODOCTYPE          = "<html><body></body></html>"
 	CONTENT_HTML_WITHDOCTYPE        = "<!doctype html><html><body></body></html>"
-	CONTENT_HTML_WITH_FRONTMATTER   = "---\ntilte: front matter\n---\n<!doctype><html><body></body></html>"
+	CONTENT_HTML_WITH_FRONTMATTER   = "---\ntitle: front matter\n---\n<!doctype><html><body></body></html>"
 	CONTENT_LWS_HTML                = "    <html><body></body></html>"
 	CONTENT_LWS_LF_HTML             = "\n<html><body></body></html>"
 	CONTENT_INCOMPLETE_BEG_FM_DELIM = "--\ntitle: incomplete beg fm delim\n---\nincomplete frontmatter delim"
@@ -73,19 +73,29 @@ func checkPageFrontMatterIsNil(t *testing.T, p *Page, content string, expected b
 	}
 }
 
+func checkPageFrontMatterContent(t *testing.T, p *Page, frontMatter string) {
+	if p.frontmatter == nil {
+		return
+	}
+	if !bytes.Equal(p.frontmatter, []byte(frontMatter)) {
+		t.Errorf("expected fromtatter expected %q, got %q", frontMatter, p.frontmatter)
+	}
+}
+
 func TestStandaloneCreatePageFrom(t *testing.T) {
 	tests := []struct {
 		content            string
 		expectedMustRender bool
 		frontMatterIsNil   bool
+		frontMatter        string
 	}{
-		{CONTENT_NO_FRONTMATTER, true, true},
-		{CONTENT_WITH_FRONTMATTER, true, false},
-		{CONTENT_HTML_NODOCTYPE, false, true},
-		{CONTENT_HTML_WITHDOCTYPE, false, true},
-		{CONTENT_HTML_WITH_FRONTMATTER, true, false},
-		{CONTENT_LWS_HTML, false, true},
-		{CONTENT_LWS_LF_HTML, false, true},
+		{CONTENT_NO_FRONTMATTER, true, true, ""},
+		{CONTENT_WITH_FRONTMATTER, true, false, "title: front matter"},
+		{CONTENT_HTML_NODOCTYPE, false, true, ""},
+		{CONTENT_HTML_WITHDOCTYPE, false, true, ""},
+		{CONTENT_HTML_WITH_FRONTMATTER, true, false, "title: front matter"},
+		{CONTENT_LWS_HTML, false, true, ""},
+		{CONTENT_LWS_LF_HTML, false, true, ""},
 	}
 
 	for _, test := range tests {
@@ -94,6 +104,7 @@ func TestStandaloneCreatePageFrom(t *testing.T) {
 			p := pageMust(ReadFrom(strings.NewReader(test.content)))
 			checkPageRender(t, p, test.expectedMustRender)
 			checkPageFrontMatterIsNil(t, p, test.content, test.frontMatterIsNil)
+			checkPageFrontMatterContent(t, p, test.frontMatter)
 		}
 	}
 }
@@ -198,5 +209,47 @@ func TestExtractFrontMatter(t *testing.T) {
 		if !bytes.Equal(fm, test.extracted) {
 			t.Errorf("Expected Front Matter %q. got %q", string(test.extracted), fm)
 		}
+	}
+}
+
+func TestParseFrontMatter(t *testing.T) {
+	type expectedProp []struct {
+		key, value string
+		ok         bool
+	}
+	tests := []struct {
+		frontmatter string
+		properties  expectedProp
+	}{
+		{"---\ntitle: test\nauthor: me\n---\n",
+			expectedProp{
+				{"title", "test", true},
+				{"author", "me", true},
+				{"missing", "", false},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		p := pageMust(ReadFrom(strings.NewReader(test.frontmatter)))
+
+		for _, expected := range test.properties {
+			v, ok := p.Property(expected.key)
+			if v != expected.value {
+				t.Errorf("Expected key: %s to be %s, got: %s", expected.key, expected.value, v)
+				continue
+			}
+			if ok != expected.ok {
+				t.Errorf("Expected key: %s ok: %t, got %t", expected.key, expected.ok, ok)
+			}
+		}
+	}
+}
+
+func TestDegeneratePageParseBadFM(t *testing.T) {
+	var badFrontMatter = "---\nfoobar: [fiz}bazz</html>\n---\ncontent\n"
+	_, err := ReadFrom(strings.NewReader(badFrontMatter))
+	if err == nil {
+		t.Fatalf("Expected ReadFrom to return an error.")
 	}
 }

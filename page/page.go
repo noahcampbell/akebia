@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"launchpad.net/goyaml"
 	"unicode"
 )
 
@@ -17,10 +18,23 @@ const (
 
 type Page struct {
 	render      bool
-	frontmatter []byte
+	frontmatter FrontMatter
+	parsedFM    map[interface{}]interface{}
 }
 
 type FrontMatter []byte
+
+func (p *Page) Property(key string) (value string, ok bool) {
+	err := p.parseFM()
+	if err != nil {
+		panic(err) // TODO not go crazy if there is an error
+	}
+	if value, ok := p.parsedFM[key]; ok {
+		return value.(string), ok
+	}
+
+	return "", false
+}
 
 func ReadFrom(r io.Reader) (page *Page, err error) {
 	reader := bufio.NewReader(r)
@@ -29,9 +43,17 @@ func ReadFrom(r io.Reader) (page *Page, err error) {
 		return
 	}
 
-	firstFive := make([]byte, 5)
+	firstFive := make([]byte, 4)
 	if _, err = reader.Read(firstFive); err != nil {
 		return
+	}
+
+	if firstFive[len(firstFive)-1] == '\r' {
+		c, err := reader.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		firstFive = append(firstFive, c)
 	}
 
 	page = new(Page)
@@ -45,6 +67,7 @@ func ReadFrom(r io.Reader) (page *Page, err error) {
 		page.frontmatter = fm
 	}
 
+	err = page.parseFM()
 	return
 }
 
@@ -107,9 +130,28 @@ func extractFrontMatter(r io.Reader) (fm FrontMatter, err error) {
 			continue
 		case '\n':
 			if isFrontMatterDelim(buf[i+1:]) {
-				return FrontMatter(buf[:i]), nil
+				var chop int
+				if buf[i-1] == '\r' {
+					chop = 1
+				}
+				return FrontMatter(buf[:i-chop]), nil
 			}
 		}
 	}
 	return nil, errors.New("Could not find Front Matter.")
+}
+
+func (p *Page) parseFM() error {
+
+	if p.parsedFM != nil {
+		return nil
+	}
+
+	parsedFM := make(map[interface{}]interface{})
+	err := goyaml.Unmarshal(p.frontmatter, &parsedFM)
+	if err != nil {
+		return err
+	}
+	p.parsedFM = parsedFM
+	return nil
 }
