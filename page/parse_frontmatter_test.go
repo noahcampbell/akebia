@@ -1,6 +1,7 @@
 package page
 
 import (
+	"bufio"
 	"bytes"
 	"os"
 	"path/filepath"
@@ -12,7 +13,7 @@ var (
 	CONTENT_EMPTY                   = ""
 	CONTENT_NO_FRONTMATTER          = "a page with no front matter"
 	CONTENT_WITH_FRONTMATTER        = "---\ntitle: front matter\n---\nContent with front matter"
-	CONTENT_HTML_NODOCTYPE          = "<html><body></body></html>"
+	CONTENT_HTML_NODOCTYPE          = "<html>\n\t<body>\n\t</body>\n</html>"
 	CONTENT_HTML_WITHDOCTYPE        = "<!doctype html><html><body></body></html>"
 	CONTENT_HTML_WITH_FRONTMATTER   = "---\ntitle: front matter\n---\n<!doctype><html><body></body></html>"
 	CONTENT_LWS_HTML                = "    <html><body></body></html>"
@@ -78,7 +79,13 @@ func checkPageFrontMatterContent(t *testing.T, p *Page, frontMatter string) {
 		return
 	}
 	if !bytes.Equal(p.frontmatter, []byte(frontMatter)) {
-		t.Errorf("expected fromtatter expected %q, got %q", frontMatter, p.frontmatter)
+		t.Errorf("expected frontmatter %q, got %q", frontMatter, p.frontmatter)
+	}
+}
+
+func checkPageContent(t *testing.T, p *Page, expected string) {
+	if !bytes.Equal(p.content, []byte(expected)) {
+		t.Errorf("expected content %q, got %q", expected, p.content)
 	}
 }
 
@@ -88,23 +95,27 @@ func TestStandaloneCreatePageFrom(t *testing.T) {
 		expectedMustRender bool
 		frontMatterIsNil   bool
 		frontMatter        string
+		bodycontent        string
 	}{
-		{CONTENT_NO_FRONTMATTER, true, true, ""},
-		{CONTENT_WITH_FRONTMATTER, true, false, "title: front matter"},
-		{CONTENT_HTML_NODOCTYPE, false, true, ""},
-		{CONTENT_HTML_WITHDOCTYPE, false, true, ""},
-		{CONTENT_HTML_WITH_FRONTMATTER, true, false, "title: front matter"},
-		{CONTENT_LWS_HTML, false, true, ""},
-		{CONTENT_LWS_LF_HTML, false, true, ""},
+		{CONTENT_NO_FRONTMATTER, true, true, "", "a page with no front matter"},
+		{CONTENT_WITH_FRONTMATTER, true, false, "title: front matter\n", "Content with front matter"},
+		{CONTENT_HTML_NODOCTYPE, false, true, "", "<html>\n\t<body>\n\t</body>\n</html>"},
+		{CONTENT_HTML_WITHDOCTYPE, false, true, "", "<!doctype html><html><body></body></html>"},
+		{CONTENT_HTML_WITH_FRONTMATTER, true, false, "title: front matter\n", "<!doctype><html><body></body></html>"},
+		{CONTENT_LWS_HTML, false, true, "", "<html><body></body></html>"},
+		{CONTENT_LWS_LF_HTML, false, true, "", "<html><body></body></html>"},
 	}
 
 	for _, test := range tests {
 		for _, ending := range lineEndings {
 			test.content = strings.Replace(test.content, "\n", ending, -1)
+			test.frontMatter = strings.Replace(test.frontMatter, "\n", ending, -1)
+			test.bodycontent = strings.Replace(test.bodycontent, "\n", ending, -1)
 			p := pageMust(ReadFrom(strings.NewReader(test.content)))
 			checkPageRender(t, p, test.expectedMustRender)
 			checkPageFrontMatterIsNil(t, p, test.content, test.frontMatterIsNil)
 			checkPageFrontMatterContent(t, p, test.frontMatter)
+			checkPageContent(t, p, test.bodycontent)
 		}
 	}
 }
@@ -190,18 +201,19 @@ func TestExtractFrontMatter(t *testing.T) {
 		{"---\nfoobar", nil, false},
 		{"---\nfoobar\nbarfoo\nfizbaz\n", nil, false},
 		{"---\nblar\n-\n", nil, false},
-		{"ralb\n---\n", []byte("ralb"), true},
-		{"minc\n---\ncontent", []byte("minc"), true},
-		{"cnim\n---\ncontent\n", []byte("cnim"), true},
-		{"---\nralb\n---\n", []byte("ralb"), true},
-		{"---\nminc\n---\ncontent", []byte("minc"), true},
-		{"---\ncnim\n---\ncontent\n", []byte("cnim"), true},
+		{"ralb\nbeeboo\n---\n", []byte("ralb\nbeeboo\n"), true},
+		{"minc\n---\ncontent", []byte("minc\n"), true},
+		{"cnim\n---\ncontent\n", []byte("cnim\n"), true},
+		{"---\nralb\n---\n", []byte("ralb\n"), true},
+		{"---\nminc\n---\ncontent", []byte("minc\n"), true},
+		{"---\ncnim\n---\ncontent\n", []byte("cnim\n"), true},
 	}
 
 	for _, test := range tests {
 		for _, ending := range lineEndings {
 			test.frontmatter = strings.Replace(test.frontmatter, "\n", ending, -1)
-			fm, err := extractFrontMatter(strings.NewReader(test.frontmatter))
+			test.extracted = bytes.Replace(test.extracted, []byte("\n"), []byte(ending), -1)
+			fm, err := extractFrontMatter(bufio.NewReader(strings.NewReader(test.frontmatter)))
 			if (err == nil) != test.errIsNil {
 				t.Logf("\n%q\n", string(test.frontmatter))
 				t.Errorf("Expected err == nil => %t, got: %t. err: %s", test.errIsNil, err == nil, err)

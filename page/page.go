@@ -19,10 +19,12 @@ const (
 type Page struct {
 	render      bool
 	frontmatter FrontMatter
+	content     Content
 	parsedFM    map[interface{}]interface{}
 }
 
 type FrontMatter []byte
+type Content []byte
 
 func (p *Page) Property(key string) (value string, ok bool) {
 	err := p.parseFM()
@@ -43,29 +45,28 @@ func ReadFrom(r io.Reader) (page *Page, err error) {
 		return
 	}
 
-	firstFive := make([]byte, 4)
-	if _, err = reader.Read(firstFive); err != nil {
+	firstLine, err := peekLine(reader)
+	if err != nil {
 		return
 	}
 
-	if firstFive[len(firstFive)-1] == '\r' {
-		c, err := reader.ReadByte()
-		if err != nil {
-			return nil, err
-		}
-		firstFive = append(firstFive, c)
-	}
-
 	page = new(Page)
-	page.render = shouldRender(firstFive)
+	page.render = shouldRender(firstLine)
 
-	if page.render && isFrontMatterDelim(firstFive) {
+	if page.render && isFrontMatterDelim(firstLine) {
 		fm, err := extractFrontMatter(reader)
 		if err != nil {
 			return nil, err
 		}
 		page.frontmatter = fm
 	}
+
+	content, err := extractContent(reader)
+	if err != nil {
+		return nil, err
+	}
+
+	page.content = content
 
 	err = page.parseFM()
 	return
@@ -81,6 +82,18 @@ func chompWhitespace(r io.RuneScanner) (err error) {
 			r.UnreadRune()
 			return nil
 		}
+	}
+	return
+}
+
+func peekLine(r *bufio.Reader) (line []byte, err error) {
+	line, err = r.Peek(5)
+	if err != nil {
+		return
+	}
+
+	if line[3] == '\n' {
+		return line[:4], nil
 	}
 	return
 }
@@ -113,32 +126,43 @@ func isFrontMatterDelim(data []byte) bool {
 }
 
 // extractFrontMatter looks for the --- sequence followed by a newline
-func extractFrontMatter(r io.Reader) (fm FrontMatter, err error) {
-	buf := make([]byte, 1024) // TODO make this not a fixed buffer
-	if _, err = r.Read(buf); err != nil {
-		return nil, err
-	}
+func extractFrontMatter(r *bufio.Reader) (fm FrontMatter, err error) {
 
 	// strip off front matter delim if it's present.
-	if isFrontMatterDelim(buf) {
-		buf = buf[bytes.Index(buf, []byte{'\n'})+1:]
+	firstLine, err := peekLine(r)
+	if err != nil {
+		return
+	}
+	if isFrontMatterDelim(firstLine) {
+		if _, err = r.Read(firstLine); err != nil {
+			return
+		}
 	}
 
-	for i, c := range buf {
-		switch c {
-		case '\r':
-			continue
-		case '\n':
-			if isFrontMatterDelim(buf[i+1:]) {
-				var chop int
-				if buf[i-1] == '\r' {
-					chop = 1
-				}
-				return FrontMatter(buf[:i-chop]), nil
-			}
+	wr := new(bytes.Buffer)
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			return nil, err
+		}
+
+		if isFrontMatterDelim(line) {
+			return FrontMatter(wr.Bytes()), nil
+		}
+		_, err = wr.Write(line)
+		if err != nil {
+			return nil, err
 		}
 	}
 	return nil, errors.New("Could not find Front Matter.")
+}
+
+func extractContent(r io.Reader) (content Content, err error) {
+	wr := new(bytes.Buffer)
+	if _, err = io.Copy(wr, r); err != nil {
+		return
+	}
+	return wr.Bytes(), nil
 }
 
 func (p *Page) parseFM() error {
