@@ -77,6 +77,7 @@ func ReadFrom(r io.Reader) (page *Page, err error) {
 			return nil, err
 		}
 		page.frontmatter = fm
+
 		err = page.parseFM()
 		if err != nil {
 			return nil, err
@@ -180,7 +181,7 @@ func extractFrontMatter(r *bufio.Reader) (fm FrontMatter, err error) {
 
 func extractContent(r io.Reader) (content Content, err error) {
 	wr := new(bytes.Buffer)
-	if _, err = io.Copy(wr, r); err != nil {
+	if _, err = wr.ReadFrom(r); err != nil {
 		return
 	}
 	return wr.Bytes(), nil
