@@ -13,7 +13,18 @@ const (
 	HTML_LEAD       = "<"
 	YAML_LEAD       = "-"
 	YAML_DELIM_UNIX = "---\n"
-	YAML_DELIM_DOS  = "---\r\n"
+	TOML_LEAD       = "+"
+	TOML_DELIM_UNIX = "+++\n"
+)
+
+var (
+	delims = [][]byte{
+		[]byte(YAML_DELIM_UNIX),
+		[]byte(TOML_DELIM_UNIX),
+	}
+
+	unixEnding = []byte("\n")
+	dosEnding  = []byte("\r\n")
 )
 
 type Page struct {
@@ -132,16 +143,18 @@ func shouldRender(lead []byte) (frontmatter bool) {
 }
 
 func isFrontMatterDelim(data []byte) bool {
-	if !bytes.Equal(data[:1], []byte(YAML_LEAD)) {
+	if bytes.IndexAny(data[:1], YAML_LEAD+TOML_LEAD) == -1 {
 		return false
 	}
 
-	if len(data) >= 4 && bytes.Equal(data[:4], []byte(YAML_DELIM_UNIX)) {
-		return true
-	}
+	for _, d := range delims {
+		if len(data) >= 4 && bytes.Equal(data[:4], d) {
+			return true
+		}
 
-	if len(data) >= 5 && bytes.Equal(data[:5], []byte(YAML_DELIM_DOS)) {
-		return true
+		if len(data) >= 5 && bytes.Equal(data[:5], bytes.Replace(d, unixEnding, dosEnding, -1)) {
+			return true
+		}
 	}
 
 	return false
@@ -186,4 +199,3 @@ func extractContent(r io.Reader) (content Content, err error) {
 	}
 	return wr.Bytes(), nil
 }
-

@@ -26,6 +26,7 @@ var (
 )
 
 var lineEndings = []string{"\n", "\r\n"}
+var delimiters = []string{"-", "+"}
 
 func pageMust(page *Page, err error) *Page {
 	if err != nil {
@@ -225,15 +226,18 @@ func TestExtractFrontMatter(t *testing.T) {
 		for _, ending := range lineEndings {
 			test.frontmatter = strings.Replace(test.frontmatter, "\n", ending, -1)
 			test.extracted = bytes.Replace(test.extracted, []byte("\n"), []byte(ending), -1)
-			fm, err := extractFrontMatter(bufio.NewReader(strings.NewReader(test.frontmatter)))
-			if (err == nil) != test.errIsNil {
-				t.Logf("\n%q\n", string(test.frontmatter))
-				t.Errorf("Expected err == nil => %t, got: %t. err: %s", test.errIsNil, err == nil, err)
-				continue
-			}
-			if !bytes.Equal(fm, test.extracted) {
-				t.Logf("\n%q\n", string(test.frontmatter))
-				t.Errorf("Expected front matter %q. got %q", string(test.extracted), fm)
+			for _, delim := range delimiters {
+				test.frontmatter = strings.Replace(test.frontmatter, "-", delim, -1)
+				fm, err := extractFrontMatter(bufio.NewReader(strings.NewReader(test.frontmatter)))
+				if (err == nil) != test.errIsNil {
+					t.Logf("\n%q\n", string(test.frontmatter))
+					t.Errorf("Expected err == nil => %t, got: %t. err: %s", test.errIsNil, err == nil, err)
+					continue
+				}
+				if !bytes.Equal(fm, test.extracted) {
+					t.Logf("\n%q\n", string(test.frontmatter))
+					t.Errorf("Expected front matter %q. got %q", string(test.extracted), fm)
+				}
 			}
 		}
 	}
