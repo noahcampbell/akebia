@@ -26,6 +26,8 @@ type Page struct {
 type FrontMatter []byte
 type Content []byte
 
+// Property returns a string representation of a key parsed in the
+// page's front matter.
 func (p *Page) Property(key string) (value string, ok bool) {
 	err := p.parseFM()
 	if err != nil {
@@ -38,6 +40,22 @@ func (p *Page) Property(key string) (value string, ok bool) {
 	return "", false
 }
 
+func (p *Page) parseFM() error {
+
+	if p.parsedFM != nil {
+		return nil
+	}
+
+	parsedFM := make(map[interface{}]interface{})
+	err := goyaml.Unmarshal(p.frontmatter, &parsedFM)
+	if err != nil {
+		return err
+	}
+	p.parsedFM = parsedFM
+	return nil
+}
+
+// ReadFrom reads the content from an io.Reader and constructs a page.
 func ReadFrom(r io.Reader) (page *Page, err error) {
 	reader := bufio.NewReader(r)
 
@@ -59,6 +77,10 @@ func ReadFrom(r io.Reader) (page *Page, err error) {
 			return nil, err
 		}
 		page.frontmatter = fm
+		err = page.parseFM()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	content, err := extractContent(reader)
@@ -68,7 +90,6 @@ func ReadFrom(r io.Reader) (page *Page, err error) {
 
 	page.content = content
 
-	err = page.parseFM()
 	return
 }
 
@@ -165,17 +186,3 @@ func extractContent(r io.Reader) (content Content, err error) {
 	return wr.Bytes(), nil
 }
 
-func (p *Page) parseFM() error {
-
-	if p.parsedFM != nil {
-		return nil
-	}
-
-	parsedFM := make(map[interface{}]interface{})
-	err := goyaml.Unmarshal(p.frontmatter, &parsedFM)
-	if err != nil {
-		return err
-	}
-	p.parsedFM = parsedFM
-	return nil
-}

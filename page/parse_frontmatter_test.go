@@ -3,6 +3,7 @@ package page
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,23 +121,34 @@ func TestStandaloneCreatePageFrom(t *testing.T) {
 	}
 }
 
-func TestLongFormRender(t *testing.T) {
+func BenchmarkLongFormRender(b *testing.B) {
 
 	tests := []struct {
 		filename string
+		buf      []byte
 	}{
-		{"long_text_test.md"},
+		{filename: "long_text_test.md"},
 	}
-	for _, test := range tests {
+	for i, test := range tests {
 		path := filepath.FromSlash(test.filename)
 		f, err := os.Open(path)
 		if err != nil {
-			t.Fatalf("Unable to open %s: %s", path, err)
+			b.Fatalf("Unable to open %s: %s", path, err)
 		}
+		defer f.Close()
+		membuf := new(bytes.Buffer)
+		if _, err := io.Copy(membuf, f); err != nil {
+			b.Fatalf("Unable to read %s: %s", path, err)
+		}
+		tests[i].buf = membuf.Bytes()
+	}
 
-		defer pageRecoverAndLog(t)
-		p := pageMust(ReadFrom(f))
-		checkPageFrontMatterIsNil(t, p, "[long file]", false)
+	b.ResetTimer()
+
+	for i := 0; i <= b.N; i++ {
+		for _, test := range tests {
+			ReadFrom(bytes.NewReader(test.buf))
+		}
 	}
 }
 
