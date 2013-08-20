@@ -13,14 +13,20 @@ const (
 	HTML_LEAD       = "<"
 	YAML_LEAD       = "-"
 	YAML_DELIM_UNIX = "---\n"
+	YAML_DELIM_DOS  = "---\r\n"
 	TOML_LEAD       = "+"
 	TOML_DELIM_UNIX = "+++\n"
+	TOML_DELIM_DOS  = "+++\r\n"
+	JAVA_LEAD       = "{"
 )
 
 var (
 	delims = [][]byte{
 		[]byte(YAML_DELIM_UNIX),
+		[]byte(YAML_DELIM_DOS),
 		[]byte(TOML_DELIM_UNIX),
+		[]byte(TOML_DELIM_DOS),
+		[]byte(JAVA_LEAD),
 	}
 
 	unixEnding = []byte("\n")
@@ -83,7 +89,8 @@ func ReadFrom(r io.Reader) (page *Page, err error) {
 	page.render = shouldRender(firstLine)
 
 	if page.render && isFrontMatterDelim(firstLine) {
-		fm, err := extractFrontMatter(reader)
+		left, right := determineDelims(firstLine)
+		fm, err := extractFrontMatterDelims(reader, left, right)
 		if err != nil {
 			return nil, err
 		}
@@ -120,15 +127,16 @@ func chompWhitespace(r io.RuneScanner) (err error) {
 }
 
 func peekLine(r *bufio.Reader) (line []byte, err error) {
-	line, err = r.Peek(5)
+	firstFive, err := r.Peek(5)
 	if err != nil {
 		return
 	}
-
-	if line[3] == '\n' {
-		return line[:4], nil
+	idx := bytes.IndexByte(firstFive, '\n')
+	if idx == -1 {
+		return firstFive, nil
 	}
-	return
+	idx += 1 // include newline.
+	return firstFive[:idx], nil
 }
 
 func shouldRender(lead []byte) (frontmatter bool) {
@@ -143,16 +151,8 @@ func shouldRender(lead []byte) (frontmatter bool) {
 }
 
 func isFrontMatterDelim(data []byte) bool {
-	if bytes.IndexAny(data[:1], YAML_LEAD+TOML_LEAD) == -1 {
-		return false
-	}
-
 	for _, d := range delims {
-		if len(data) >= 4 && bytes.Equal(data[:4], d) {
-			return true
-		}
-
-		if len(data) >= 5 && bytes.Equal(data[:5], bytes.Replace(d, unixEnding, dosEnding, -1)) {
+		if bytes.Equal(data, d) {
 			return true
 		}
 	}
@@ -160,36 +160,95 @@ func isFrontMatterDelim(data []byte) bool {
 	return false
 }
 
-// extractFrontMatter looks for the --- sequence followed by a newline
-func extractFrontMatter(r *bufio.Reader) (fm FrontMatter, err error) {
-
-	// strip off front matter delim if it's present.
-	firstLine, err := peekLine(r)
-	if err != nil {
-		return
-	}
-	if isFrontMatterDelim(firstLine) {
-		if _, err = r.Read(firstLine); err != nil {
-			return
+func determineDelims(firstLine []byte) (left, right []byte) {
+	switch len(firstLine) {
+	case 4:
+		if firstLine[0] == YAML_LEAD[0] {
+			return []byte(YAML_DELIM_UNIX), []byte(YAML_DELIM_UNIX)
 		}
-	}
+		return []byte(TOML_DELIM_UNIX), []byte(TOML_DELIM_UNIX)
 
+	case 5:
+		if firstLine[0] == YAML_LEAD[0] {
+			return []byte(YAML_DELIM_DOS), []byte(YAML_DELIM_DOS)
+		}
+		return []byte(TOML_DELIM_DOS), []byte(TOML_DELIM_DOS)
+	case 1:
+		return []byte(JAVA_LEAD), []byte("}")
+	}
+	return
+}
+
+func extractFrontMatter(r *bufio.Reader) (fm FrontMatter, err error) {
+	return extractFrontMatterDelims(r, []byte(YAML_DELIM_UNIX), []byte(YAML_DELIM_UNIX))
+}
+
+func extractFrontMatterDelims(r *bufio.Reader, left, right []byte) (fm FrontMatter, err error) {
+	var level int = 0
+	var sameDelim = bytes.Equal(left, right)
 	wr := new(bytes.Buffer)
 	for {
-		line, err := r.ReadBytes('\n')
+		c, err := r.ReadByte()
 		if err != nil {
 			return nil, err
 		}
 
-		if isFrontMatterDelim(line) {
-			return FrontMatter(wr.Bytes()), nil
+		switch c {
+		case left[0]:
+			match, err := matches(r, wr, []byte{c}, left)
+			if err != nil {
+				return nil, err
+			}
+			if match {
+				if sameDelim {
+					if level == 0 {
+						level = 1
+					} else {
+						level = 0
+					}
+				} else {
+					level += 1
+				}
+			}
+		case right[0]:
+			match, err := matches(r, wr, []byte{c}, right)
+			if err != nil {
+				return nil, err
+			}
+			if match {
+				level -= 1
+			}
+		default:
+			if err = wr.WriteByte(c); err != nil {
+				return nil, err
+			}
 		}
-		_, err = wr.Write(line)
-		if err != nil {
-			return nil, err
+
+		if level == 0 && !unicode.IsSpace(rune(c)) {
+			return wr.Bytes(), nil
 		}
 	}
-	return nil, errors.New("Could not find Front Matter.")
+	return nil, errors.New("Could not find front matter.")
+}
+
+func matches(r *bufio.Reader, wr io.Writer, c, expected []byte) (ok bool, err error) {
+	if len(expected) == 1 {
+		if _, err = wr.Write(c); err != nil {
+			return
+		}
+		return bytes.Equal(c, expected), nil
+	}
+	buf := make([]byte, len(expected)-1)
+	if _, err = r.Read(buf); err != nil {
+		return
+	}
+
+	buf = append(c, buf...)
+	if _, err = wr.Write(buf); err != nil {
+		return
+	}
+
+	return bytes.Equal(expected, buf), nil
 }
 
 func extractContent(r io.Reader) (content Content, err error) {

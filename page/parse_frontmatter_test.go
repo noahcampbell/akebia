@@ -1,5 +1,7 @@
 package page
 
+// TODO Support Mac Encoding (\r)
+
 import (
 	"bufio"
 	"bytes"
@@ -49,7 +51,6 @@ func TestDegenerateCreatePageFrom(t *testing.T) {
 		{CONTENT_MISSING_END_FM_DELIM},
 		{CONTENT_INCOMPLETE_END_FM_DELIM},
 		{CONTENT_FM_NO_DOC},
-		//{CONTENT_INCOMPLETE_BEG_FM_DELIM},
 	}
 
 	for _, test := range tests {
@@ -57,7 +58,7 @@ func TestDegenerateCreatePageFrom(t *testing.T) {
 			test.content = strings.Replace(test.content, "\n", ending, -1)
 			_, err := ReadFrom(strings.NewReader(test.content))
 			if err == nil {
-				t.Errorf("Content should return an err:\n%s\n", test.content)
+				t.Errorf("Content should return an err:\n%q\n", test.content)
 			}
 		}
 	}
@@ -100,10 +101,10 @@ func TestStandaloneCreatePageFrom(t *testing.T) {
 		bodycontent        string
 	}{
 		{CONTENT_NO_FRONTMATTER, true, true, "", "a page with no front matter"},
-		{CONTENT_WITH_FRONTMATTER, true, false, "title: front matter\n", "Content with front matter"},
+		{CONTENT_WITH_FRONTMATTER, true, false, "---\ntitle: front matter\n---\n", "Content with front matter"},
 		{CONTENT_HTML_NODOCTYPE, false, true, "", "<html>\n\t<body>\n\t</body>\n</html>"},
 		{CONTENT_HTML_WITHDOCTYPE, false, true, "", "<!doctype html><html><body></body></html>"},
-		{CONTENT_HTML_WITH_FRONTMATTER, true, false, "title: front matter\n", "<!doctype><html><body></body></html>"},
+		{CONTENT_HTML_WITH_FRONTMATTER, true, false, "---\ntitle: front matter\n---\n", "<!doctype><html><body></body></html>"},
 		{CONTENT_LWS_HTML, false, true, "", "<html><body></body></html>"},
 		{CONTENT_LWS_LF_HTML, false, true, "", "<html><body></body></html>"},
 	}
@@ -113,6 +114,7 @@ func TestStandaloneCreatePageFrom(t *testing.T) {
 			test.content = strings.Replace(test.content, "\n", ending, -1)
 			test.frontMatter = strings.Replace(test.frontMatter, "\n", ending, -1)
 			test.bodycontent = strings.Replace(test.bodycontent, "\n", ending, -1)
+			t.Logf("%q\n", test.content)
 			p := pageMust(ReadFrom(strings.NewReader(test.content)))
 			checkPageRender(t, p, test.expectedMustRender)
 			checkPageFrontMatterIsNil(t, p, test.content, test.frontMatterIsNil)
@@ -187,9 +189,10 @@ func TestPageHasFrontMatter(t *testing.T) {
 		{[]byte("--"), false},
 		{[]byte("---"), false},
 		{[]byte("---\n"), true},
-		{[]byte("---\nA"), true},
-		// TODO support MAC encoding {[]byte("---\rA"), true},
+		{[]byte("---\n"), true},
 		{[]byte{'a'}, false},
+		{[]byte{'{'}, true},
+		{[]byte{'}'}, false},
 	}
 	for _, test := range tests {
 		for _, ending := range lineEndings {
@@ -214,12 +217,9 @@ func TestExtractFrontMatter(t *testing.T) {
 		{"---\nfoobar", nil, false},
 		{"---\nfoobar\nbarfoo\nfizbaz\n", nil, false},
 		{"---\nblar\n-\n", nil, false},
-		{"ralb\nbeeboo\n---\n", []byte("ralb\nbeeboo\n"), true},
-		{"minc\n---\ncontent", []byte("minc\n"), true},
-		{"cnim\n---\ncontent\n", []byte("cnim\n"), true},
-		{"---\nralb\n---\n", []byte("ralb\n"), true},
-		{"---\nminc\n---\ncontent", []byte("minc\n"), true},
-		{"---\ncnim\n---\ncontent\n", []byte("cnim\n"), true},
+		{"---\nralb\n---\n", []byte("---\nralb\n---\n"), true},
+		{"---\nminc\n---\ncontent", []byte("---\nminc\n---\n"), true},
+		{"---\ncnim\n---\ncontent\n", []byte("---\ncnim\n---\n"), true},
 	}
 
 	for _, test := range tests {
@@ -228,7 +228,13 @@ func TestExtractFrontMatter(t *testing.T) {
 			test.extracted = bytes.Replace(test.extracted, []byte("\n"), []byte(ending), -1)
 			for _, delim := range delimiters {
 				test.frontmatter = strings.Replace(test.frontmatter, "-", delim, -1)
-				fm, err := extractFrontMatter(bufio.NewReader(strings.NewReader(test.frontmatter)))
+				test.extracted = bytes.Replace(test.extracted, []byte("-"), []byte(delim), -1)
+				line, err := peekLine(bufio.NewReader(strings.NewReader(test.frontmatter)))
+				if err != nil {
+					continue
+				}
+				l, r := determineDelims(line)
+				fm, err := extractFrontMatterDelims(bufio.NewReader(strings.NewReader(test.frontmatter)), l, r)
 				if (err == nil) != test.errIsNil {
 					t.Logf("\n%q\n", string(test.frontmatter))
 					t.Errorf("Expected err == nil => %t, got: %t. err: %s", test.errIsNil, err == nil, err)
@@ -239,6 +245,42 @@ func TestExtractFrontMatter(t *testing.T) {
 					t.Errorf("Expected front matter %q. got %q", string(test.extracted), fm)
 				}
 			}
+		}
+	}
+}
+
+func TestExtractFrontMatterDelim(t *testing.T) {
+	var (
+		noErrExpected = true
+		errExpected   = false
+	)
+	tests := []struct {
+		frontmatter string
+		extracted   string
+		errIsNil    bool
+	}{
+		{"", "", errExpected},
+		{"{", "", errExpected},
+		{"{}", "{}", noErrExpected},
+		{" {}", " {}", noErrExpected},
+		{"{} ", "{}", noErrExpected},
+		{"{ } ", "{ }", noErrExpected},
+		{"{ { }", "", errExpected},
+		{"{ { } }", "{ { } }", noErrExpected},
+		{"{ { } { } }", "{ { } { } }", noErrExpected},
+		{"{\n{\n}\n}\n", "{\n{\n}\n}", noErrExpected},
+	}
+
+	for _, test := range tests {
+		fm, err := extractFrontMatterDelims(bufio.NewReader(strings.NewReader(test.frontmatter)), []byte("{"), []byte("}"))
+		if (err == nil) != test.errIsNil {
+			t.Logf("\n%q\n", string(test.frontmatter))
+			t.Errorf("Expected err == nil => %t, got: %t. err: %s", test.errIsNil, err == nil, err)
+			continue
+		}
+		if !bytes.Equal(fm, []byte(test.extracted)) {
+			t.Logf("\n%q\n", string(test.frontmatter))
+			t.Errorf("Expected front matter %q. got %q", string(test.extracted), fm)
 		}
 	}
 }
