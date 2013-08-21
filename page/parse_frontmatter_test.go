@@ -30,11 +30,11 @@ var (
 var lineEndings = []string{"\n", "\r\n"}
 var delimiters = []string{"-", "+"}
 
-func pageMust(page *Page, err error) *Page {
+func pageMust(p Page, err error) *page {
 	if err != nil {
 		panic(err)
 	}
-	return page
+	return p.(*page)
 }
 
 func pageRecoverAndLog(t *testing.T) {
@@ -64,20 +64,20 @@ func TestDegenerateCreatePageFrom(t *testing.T) {
 	}
 }
 
-func checkPageRender(t *testing.T, p *Page, expected bool) {
+func checkPageRender(t *testing.T, p *page, expected bool) {
 	if p.render != expected {
 		t.Errorf("page.render should be %t, got: %t", expected, p.render)
 	}
 }
 
-func checkPageFrontMatterIsNil(t *testing.T, p *Page, content string, expected bool) {
+func checkPageFrontMatterIsNil(t *testing.T, p *page, content string, expected bool) {
 	if bool(p.frontmatter == nil) != expected {
 		t.Logf("\n%q\n", content)
 		t.Errorf("page.frontmatter == nil? %t, got %t", expected, p.frontmatter == nil)
 	}
 }
 
-func checkPageFrontMatterContent(t *testing.T, p *Page, frontMatter string) {
+func checkPageFrontMatterContent(t *testing.T, p *page, frontMatter string) {
 	if p.frontmatter == nil {
 		return
 	}
@@ -86,7 +86,7 @@ func checkPageFrontMatterContent(t *testing.T, p *Page, frontMatter string) {
 	}
 }
 
-func checkPageContent(t *testing.T, p *Page, expected string) {
+func checkPageContent(t *testing.T, p *page, expected string) {
 	if !bytes.Equal(p.content, []byte(expected)) {
 		t.Errorf("expected content %q, got %q", expected, p.content)
 	}

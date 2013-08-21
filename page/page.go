@@ -33,19 +33,33 @@ var (
 	dosEnding  = []byte("\r\n")
 )
 
-type Page struct {
+type FrontMatter []byte
+type Content []byte
+
+type Page interface {
+	FrontMatter() FrontMatter
+	Content() Content
+	Property(string) (string, bool)
+}
+
+type page struct {
 	render      bool
 	frontmatter FrontMatter
 	content     Content
 	parsedFM    map[interface{}]interface{}
 }
 
-type FrontMatter []byte
-type Content []byte
+func (p *page) Content() Content {
+	return p.content
+}
+
+func (p *page) FrontMatter() FrontMatter {
+	return p.frontmatter
+}
 
 // Property returns a string representation of a key parsed in the
 // page's front matter.
-func (p *Page) Property(key string) (value string, ok bool) {
+func (p *page) Property(key string) (value string, ok bool) {
 	err := p.parseFM()
 	if err != nil {
 		panic(err) // TODO not go crazy if there is an error
@@ -57,7 +71,7 @@ func (p *Page) Property(key string) (value string, ok bool) {
 	return "", false
 }
 
-func (p *Page) parseFM() error {
+func (p *page) parseFM() error {
 
 	if p.parsedFM != nil {
 		return nil
@@ -73,7 +87,7 @@ func (p *Page) parseFM() error {
 }
 
 // ReadFrom reads the content from an io.Reader and constructs a page.
-func ReadFrom(r io.Reader) (page *Page, err error) {
+func ReadFrom(r io.Reader) (p Page, err error) {
 	reader := bufio.NewReader(r)
 
 	if err = chompWhitespace(reader); err != nil {
@@ -85,18 +99,18 @@ func ReadFrom(r io.Reader) (page *Page, err error) {
 		return
 	}
 
-	page = new(Page)
-	page.render = shouldRender(firstLine)
+	newp := new(page)
+	newp.render = shouldRender(firstLine)
 
-	if page.render && isFrontMatterDelim(firstLine) {
+	if newp.render && isFrontMatterDelim(firstLine) {
 		left, right := determineDelims(firstLine)
 		fm, err := extractFrontMatterDelims(reader, left, right)
 		if err != nil {
 			return nil, err
 		}
-		page.frontmatter = fm
+		newp.frontmatter = fm
 
-		err = page.parseFM()
+		err = newp.parseFM()
 		if err != nil {
 			return nil, err
 		}
@@ -107,9 +121,9 @@ func ReadFrom(r io.Reader) (page *Page, err error) {
 		return nil, err
 	}
 
-	page.content = content
+	newp.content = content
 
-	return
+	return newp, nil
 }
 
 func chompWhitespace(r io.RuneScanner) (err error) {
