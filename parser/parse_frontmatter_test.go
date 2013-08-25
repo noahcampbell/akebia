@@ -1,4 +1,4 @@
-package page
+package parser
 
 // TODO Support Mac Encoding (\r)
 
@@ -25,6 +25,7 @@ var (
 	CONTENT_INCOMPLETE_END_FM_DELIM = "---\ntitle: incomplete end fm delim\n--\nincomplete frontmatter delim"
 	CONTENT_MISSING_END_FM_DELIM    = "---\ntitle: incomplete end fm delim\nincomplete frontmatter delim"
 	CONTENT_FM_NO_DOC               = "---\ntitle: no doc\n---"
+	CONTENT_WITH_JS_FM = "{\n  \"categories\": \"d\",\n  \"tags\": [\n    \"a\", \n    \"b\", \n    \"c\"\n  ]\n}\nJSON Front Matter with tags and categories"
 )
 
 var lineEndings = []string{"\n", "\r\n"}
@@ -107,6 +108,7 @@ func TestStandaloneCreatePageFrom(t *testing.T) {
 		{CONTENT_HTML_WITH_FRONTMATTER, true, false, "---\ntitle: front matter\n---\n", "<!doctype><html><body></body></html>"},
 		{CONTENT_LWS_HTML, false, true, "", "<html><body></body></html>"},
 		{CONTENT_LWS_LF_HTML, false, true, "", "<html><body></body></html>"},
+		{CONTENT_WITH_JS_FM, true, false, "{\n  \"categories\": \"d\",\n  \"tags\": [\n    \"a\", \n    \"b\", \n    \"c\"\n  ]\n}", "JSON Front Matter with tags and categories"},
 	}
 
 	for _, test := range tests {
@@ -114,8 +116,9 @@ func TestStandaloneCreatePageFrom(t *testing.T) {
 			test.content = strings.Replace(test.content, "\n", ending, -1)
 			test.frontMatter = strings.Replace(test.frontMatter, "\n", ending, -1)
 			test.bodycontent = strings.Replace(test.bodycontent, "\n", ending, -1)
-			t.Logf("%q\n", test.content)
+
 			p := pageMust(ReadFrom(strings.NewReader(test.content)))
+
 			checkPageRender(t, p, test.expectedMustRender)
 			checkPageFrontMatterIsNil(t, p, test.content, test.frontMatterIsNil)
 			checkPageFrontMatterContent(t, p, test.frontMatter)
@@ -192,6 +195,7 @@ func TestPageHasFrontMatter(t *testing.T) {
 		{[]byte("---\n"), true},
 		{[]byte{'a'}, false},
 		{[]byte{'{'}, true},
+		{[]byte("{\n  "), true},
 		{[]byte{'}'}, false},
 	}
 	for _, test := range tests {
@@ -269,6 +273,7 @@ func TestExtractFrontMatterDelim(t *testing.T) {
 		{"{ { } }", "{ { } }", noErrExpected},
 		{"{ { } { } }", "{ { } { } }", noErrExpected},
 		{"{\n{\n}\n}\n", "{\n{\n}\n}", noErrExpected},
+		{"{\n  \"categories\": \"d\",\n  \"tags\": [\n    \"a\", \n    \"b\", \n    \"c\"\n  ]\n}\nJSON Front Matter with tags and categories", "{\n  \"categories\": \"d\",\n  \"tags\": [\n    \"a\", \n    \"b\", \n    \"c\"\n  ]\n}", noErrExpected},
 	}
 
 	for _, test := range tests {
@@ -285,44 +290,3 @@ func TestExtractFrontMatterDelim(t *testing.T) {
 	}
 }
 
-func TestParseFrontMatter(t *testing.T) {
-	type expectedProp []struct {
-		key, value string
-		ok         bool
-	}
-	tests := []struct {
-		frontmatter string
-		properties  expectedProp
-	}{
-		{"---\ntitle: test\nauthor: me\n---\n",
-			expectedProp{
-				{"title", "test", true},
-				{"author", "me", true},
-				{"missing", "", false},
-			},
-		},
-	}
-
-	for _, test := range tests {
-		p := pageMust(ReadFrom(strings.NewReader(test.frontmatter)))
-
-		for _, expected := range test.properties {
-			v, ok := p.Property(expected.key)
-			if v != expected.value {
-				t.Errorf("Expected key: %s to be %s, got: %s", expected.key, expected.value, v)
-				continue
-			}
-			if ok != expected.ok {
-				t.Errorf("Expected key: %s ok: %t, got %t", expected.key, expected.ok, ok)
-			}
-		}
-	}
-}
-
-func TestDegeneratePageParseBadFM(t *testing.T) {
-	var badFrontMatter = "---\nfoobar: [fiz}bazz</html>\n---\ncontent\n"
-	_, err := ReadFrom(strings.NewReader(badFrontMatter))
-	if err == nil {
-		t.Fatalf("Expected ReadFrom to return an error.")
-	}
-}

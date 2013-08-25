@@ -1,11 +1,11 @@
-package page
+package parser
 
 import (
 	"bufio"
+	"fmt"
 	"bytes"
 	"errors"
 	"io"
-	"launchpad.net/goyaml"
 	"unicode"
 )
 
@@ -39,14 +39,12 @@ type Content []byte
 type Page interface {
 	FrontMatter() FrontMatter
 	Content() Content
-	Property(string) (string, bool)
 }
 
 type page struct {
 	render      bool
 	frontmatter FrontMatter
 	content     Content
-	parsedFM    map[interface{}]interface{}
 }
 
 func (p *page) Content() Content {
@@ -55,35 +53,6 @@ func (p *page) Content() Content {
 
 func (p *page) FrontMatter() FrontMatter {
 	return p.frontmatter
-}
-
-// Property returns a string representation of a key parsed in the
-// page's front matter.
-func (p *page) Property(key string) (value string, ok bool) {
-	err := p.parseFM()
-	if err != nil {
-		panic(err) // TODO not go crazy if there is an error
-	}
-	if value, ok := p.parsedFM[key]; ok {
-		return value.(string), ok
-	}
-
-	return "", false
-}
-
-func (p *page) parseFM() error {
-
-	if p.parsedFM != nil {
-		return nil
-	}
-
-	parsedFM := make(map[interface{}]interface{})
-	err := goyaml.Unmarshal(p.frontmatter, &parsedFM)
-	if err != nil {
-		return err
-	}
-	p.parsedFM = parsedFM
-	return nil
 }
 
 // ReadFrom reads the content from an io.Reader and constructs a page.
@@ -109,11 +78,6 @@ func ReadFrom(r io.Reader) (p Page, err error) {
 			return nil, err
 		}
 		newp.frontmatter = fm
-
-		err = newp.parseFM()
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	content, err := extractContent(reader)
@@ -166,7 +130,7 @@ func shouldRender(lead []byte) (frontmatter bool) {
 
 func isFrontMatterDelim(data []byte) bool {
 	for _, d := range delims {
-		if bytes.Equal(data, d) {
+		if bytes.HasPrefix(data, d) {
 			return true
 		}
 	}
@@ -187,14 +151,16 @@ func determineDelims(firstLine []byte) (left, right []byte) {
 			return []byte(YAML_DELIM_DOS), []byte(YAML_DELIM_DOS)
 		}
 		return []byte(TOML_DELIM_DOS), []byte(TOML_DELIM_DOS)
+	case 3:
+		fallthrough
+	case 2:
+		fallthrough
 	case 1:
 		return []byte(JAVA_LEAD), []byte("}")
+	default:
+		panic(fmt.Sprintf("Unable to determine delims from %q", firstLine))
 	}
 	return
-}
-
-func extractFrontMatter(r *bufio.Reader) (fm FrontMatter, err error) {
-	return extractFrontMatterDelims(r, []byte(YAML_DELIM_UNIX), []byte(YAML_DELIM_UNIX))
 }
 
 func extractFrontMatterDelims(r *bufio.Reader, left, right []byte) (fm FrontMatter, err error) {
@@ -239,6 +205,11 @@ func extractFrontMatterDelims(r *bufio.Reader, left, right []byte) (fm FrontMatt
 		}
 
 		if level == 0 && !unicode.IsSpace(rune(c)) {
+			if err = chompWhitespace(r); err != nil {
+				if err != io.EOF {
+					return nil, err
+				}
+			}
 			return wr.Bytes(), nil
 		}
 	}
